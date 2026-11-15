@@ -392,13 +392,17 @@ with tab_map:
     with map_col:
         center = [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2]
         fmap = folium.Map(location=center, zoom_start=11, tiles=None, control_scale=True)
-        if basemap == "Satellite imagery":
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri World Imagery", name="Satellite imagery", overlay=False,
-            ).add_to(fmap)
-        else:
-            folium.TileLayer("OpenStreetMap", name="OpenStreetMap", overlay=False).add_to(fmap)
+        # Both basemaps are added so they can also be switched from the map's layer control;
+        # the sidebar choice decides which one is shown first.
+        folium.TileLayer(
+            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attr="Esri World Imagery", name="Satellite imagery", overlay=False,
+            show=(basemap == "Satellite imagery"),
+        ).add_to(fmap)
+        folium.TileLayer(
+            "OpenStreetMap", name="OpenStreetMap", overlay=False,
+            show=(basemap == "OpenStreetMap"),
+        ).add_to(fmap)
         folium.raster_layers.ImageOverlay(
             image=image, bounds=bounds, mercator_project=True, name=layer, interactive=False,
         ).add_to(fmap)
