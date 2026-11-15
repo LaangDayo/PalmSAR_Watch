@@ -80,12 +80,12 @@ def list_sites() -> dict:
 def load_stack(folder: str) -> xr.Dataset:
     path = Path(folder) / "stack.nc"
     if not path.exists():
-        raise FileNotFoundError(f"File tidak ditemukan: {path}")
+        raise FileNotFoundError(f"File not found: {path}")
     ds = xr.open_dataset(path).load()
     required = {"rvi", "hv_db"}
     missing = required.difference(ds.data_vars)
     if missing:
-        raise ValueError(f"Variabel pada stack.nc tidak lengkap: {', '.join(sorted(missing))}")
+        raise ValueError(f"Incomplete variables in stack.nc: {', '.join(sorted(missing))}")
     return ds
 
 
@@ -140,50 +140,50 @@ st.sidebar.markdown("## 🛰️ PalmSAR Watch")
 st.sidebar.caption("NISAR L-band · Oil-palm vegetation monitoring")
 if not sites:
     st.error(
-        f"Data belum ditemukan. Pastikan folder `{DATA_DIR}/<site>/` berisi "
-        "`stack.nc` dan `meta.json`. Jalankan step1–step3 terlebih dahulu."
+        f"No data found. Make sure the folder `{DATA_DIR}/<site>/` contains "
+        "`stack.nc` and `meta.json`. Run step1–step3 first."
     )
     st.stop()
 
-site = st.sidebar.selectbox("Area pemantauan", list(sites))
+site = st.sidebar.selectbox("Monitoring area", list(sites))
 meta = sites[site]
 try:
     ds = load_stack(meta["_folder"])
 except Exception as exc:
-    st.error(f"Gagal membaca data: {exc}")
+    st.error(f"Failed to read data: {exc}")
     st.stop()
 
 dates = [str(t)[:10] for t in ds.time.values]
 if len(dates) == 0:
-    st.error("Stack tidak memiliki tanggal observasi.")
+    st.error("The stack contains no observation dates.")
     st.stop()
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Pengaturan layer")
+st.sidebar.markdown("### Layer settings")
 layer = st.sidebar.selectbox(
-    "Layer utama",
+    "Main layer",
     ["Radar Vegetation Index (RVI)", "RVI change (ΔRVI)", "Change classes", "HV backscatter (dB)"],
 )
 if layer in ("RVI change (ΔRVI)", "Change classes"):
     default_pair = (dates[0], dates[-1])
-    date_pair = st.sidebar.select_slider("Rentang perbandingan", options=dates, value=default_pair)
+    date_pair = st.sidebar.select_slider("Comparison range", options=dates, value=default_pair)
     date0, date1 = date_pair
 else:
-    selected_date = st.sidebar.select_slider("Tanggal observasi", options=dates, value=dates[-1])
+    selected_date = st.sidebar.select_slider("Observation date", options=dates, value=dates[-1])
 
 rvi_thr = 0.25
 hv_thr = 3.0
 if layer == "Change classes":
-    rvi_thr = st.sidebar.slider("Ambang ΔRVI", 0.05, 0.60, 0.25, 0.05)
-    hv_thr = st.sidebar.slider("Ambang ΔHV (dB)", 0.5, 8.0, 3.0, 0.5)
-opacity = st.sidebar.slider("Transparansi raster", 0.10, 1.00, 0.78, 0.05)
+    rvi_thr = st.sidebar.slider("ΔRVI threshold", 0.05, 0.60, 0.25, 0.05)
+    hv_thr = st.sidebar.slider("ΔHV threshold (dB)", 0.5, 8.0, 3.0, 0.5)
+opacity = st.sidebar.slider("Raster opacity", 0.10, 1.00, 0.78, 0.05)
 basemap = st.sidebar.radio("Basemap", ["Satellite imagery", "OpenStreetMap"], index=0)
 
 st.sidebar.markdown("---")
-st.sidebar.caption(f"Sumber: {meta.get('source', 'NISAR GCOV')}")
-st.sidebar.caption(f"{len(dates)} tanggal observasi · {dates[0]} — {dates[-1]}")
+st.sidebar.caption(f"Source: {meta.get('source', 'NISAR GCOV')}")
+st.sidebar.caption(f"{len(dates)} observation dates · {dates[0]} — {dates[-1]}")
 if meta.get("synthetic"):
-    st.sidebar.warning("Data sintetis / demo, bukan observasi NISAR aktual.")
+    st.sidebar.warning("Synthetic / demo data, not actual NISAR observations.")
 
 # ---------------------------- Compose raster --------------------------------
 stats = None
@@ -219,7 +219,7 @@ else:
         legend = """
         <div style="font-size:.82rem;color:#dbe7f3;margin:.5rem 0">
         <span style="color:#d7191c">■</span> Loss &nbsp;
-        <span style="color:#e6e6e6">■</span> Stabil &nbsp;
+        <span style="color:#e6e6e6">■</span> Stable &nbsp;
         <span style="color:#1a9641">■</span> Gain</div>"""
 
 bounds = meta["bounds"]  # [[lat_min, lon_min], [lat_max, lon_max]]
@@ -232,23 +232,23 @@ st.markdown(
     unsafe_allow_html=True,
 )
 if meta.get("synthetic"):
-    st.warning("DEMO MODE — area ini menggunakan data sintetis untuk pengujian antarmuka.")
+    st.warning("DEMO MODE — this area uses synthetic data for interface testing.")
 st.write("")
 
 # KPI strip
 k1, k2, k3, k4 = st.columns(4)
 with k1:
-    metric_card("Observasi", f"{len(dates)}", "Tanggal NISAR")
+    metric_card("Observations", f"{len(dates)}", "NISAR dates")
 with k2:
-    metric_card("Periode", f"{len(dates)}", f"{dates[0]} s.d. {dates[-1]}")
+    metric_card("Period", f"{len(dates)}", f"{dates[0]} to {dates[-1]}")
 with k3:
-    metric_card("Layer aktif", layer.split("(")[0].strip(), "Visualisasi peta")
+    metric_card("Active layer", layer.split("(")[0].strip(), "Map visualization")
 with k4:
-    metric_card("Resolusi waktu", "NISAR", "Deret waktu sesuai data tersedia")
+    metric_card("Temporal resolution", "NISAR", "Time series follows available data")
 
 st.write("")
 tab_map, tab_temporal, tab_accuracy, tab_method = st.tabs(
-    ["🗺️ Peta interaktif", "📈 Analisis temporal", "🎯 Validasi akurasi", "ⓘ Metode & data"]
+    ["🗺️ Interactive map", "📈 Temporal analysis", "🎯 Accuracy validation", "ⓘ Methods & data"]
 )
 
 with tab_map:
@@ -277,31 +277,31 @@ with tab_map:
         st.markdown(legend, unsafe_allow_html=True)
 
     with info_col:
-        st.markdown("### Ringkasan area")
-        st.markdown('<div class="section-note">Informasi mengikuti layer dan tanggal yang dipilih.</div>', unsafe_allow_html=True)
+        st.markdown("### Area summary")
+        st.markdown('<div class="section-note">Information follows the selected layer and date.</div>', unsafe_allow_html=True)
         if stats:
-            metric_card("Vegetation loss", f"{stats['loss']:,.1f} ha", "Estimasi berbasis ukuran piksel geografis")
+            metric_card("Vegetation loss", f"{stats['loss']:,.1f} ha", "Estimate based on geographic pixel size")
             st.write("")
-            metric_card("Vegetasi stabil", f"{stats['stable']:,.1f} ha", "Kelas tanpa perubahan melewati ambang")
+            metric_card("Stable vegetation", f"{stats['stable']:,.1f} ha", "Class with no change beyond the thresholds")
             st.write("")
-            metric_card("Vegetation gain", f"{stats['gain']:,.1f} ha", "Estimasi berbasis ukuran piksel geografis")
+            metric_card("Vegetation gain", f"{stats['gain']:,.1f} ha", "Estimate based on geographic pixel size")
         else:
-            metric_card("Tanggal aktif", selected_date if layer in ("Radar Vegetation Index (RVI)", "HV backscatter (dB)") else f"{date0} → {date1}", "Observasi / periode analisis")
+            metric_card("Active date", selected_date if layer in ("Radar Vegetation Index (RVI)", "HV backscatter (dB)") else f"{date0} → {date1}", "Observation / analysis period")
             st.write("")
-            metric_card("Nilai median RVI", f"{float(ds['rvi'].median().values):.3f}", "Median seluruh waktu dan area")
+            metric_card("Median RVI value", f"{float(ds['rvi'].median().values):.3f}", "Median across all dates and the whole area")
         clicked = (map_result or {}).get("last_clicked")
         if clicked:
             lat, lon = clicked["lat"], clicked["lng"]
             st.write("")
-            st.markdown("**Koordinat pilihan**")
+            st.markdown("**Selected coordinates**")
             st.code(f"Latitude : {lat:.6f}\nLongitude: {lon:.6f}")
             iy = int(np.abs(ds.lat.values - lat).argmin())
             ix = int(np.abs(ds.lon.values - lon).argmin())
             point_rvi = ds["rvi"].isel(lat=iy, lon=ix).values
-            st.caption(f"Pixel terdekat: RVI median = {np.nanmedian(point_rvi):.3f}")
+            st.caption(f"Nearest pixel: median RVI = {np.nanmedian(point_rvi):.3f}")
 
 with tab_temporal:
-    st.markdown("### Dinamika vegetasi sepanjang waktu")
+    st.markdown("### Vegetation dynamics over time")
     median_rvi = ds["rvi"].median(dim=("lat", "lon"), skipna=True).values
     mean_hv = ds["hv_db"].mean(dim=("lat", "lon"), skipna=True).values
     temporal = go.Figure()
@@ -309,56 +309,56 @@ with tab_temporal:
     temporal.update_layout(
         template="plotly_dark", height=430, margin=dict(l=10, r=10, t=25, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(18,31,49,.55)",
-        xaxis_title="Tanggal observasi", yaxis_title="Median RVI",
+        xaxis_title="Observation date", yaxis_title="Median RVI",
     )
     st.plotly_chart(temporal, use_container_width=True)
     hvfig = go.Figure(go.Scatter(x=dates, y=mean_hv, mode="lines+markers", name="Mean HV (dB)"))
     hvfig.update_layout(
         template="plotly_dark", height=330, margin=dict(l=10, r=10, t=25, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(18,31,49,.55)",
-        xaxis_title="Tanggal observasi", yaxis_title="Mean HV (dB)",
+        xaxis_title="Observation date", yaxis_title="Mean HV (dB)",
     )
     st.plotly_chart(hvfig, use_container_width=True)
     export_df = pd.DataFrame({"date": dates, "median_rvi": median_rvi, "mean_hv_db": mean_hv})
-    st.download_button("Unduh ringkasan temporal (CSV)", export_df.to_csv(index=False), "palmsar_temporal.csv", "text/csv")
+    st.download_button("Download temporal summary (CSV)", export_df.to_csv(index=False), "palmsar_temporal.csv", "text/csv")
 
 with tab_accuracy:
-    st.markdown("### Hasil validasi klasifikasi")
+    st.markdown("### Classification validation results")
     report_path = ROOT / "validation" / os.getenv("PALMSAR_SITE_ID", "sumut_main") / "accuracy_report.txt"
     if report_path.exists():
         st.code(report_path.read_text(encoding="utf-8"), language="text")
     else:
         st.info(
-            "Laporan akurasi belum ditemukan. Jalankan step4_samples.py, isi kolom label "
-            "pada GeoJSON di QGIS (0 = stabil, 1 = loss, 2 = gain), kemudian jalankan "
-            "step5_accuracy.py. Letakkan hasil accuracy_report.txt pada folder validation/<site_id>/."
+            "Accuracy report not found. Run step4_samples.py, fill in the label column "
+            "of the GeoJSON in QGIS (0 = stable, 1 = loss, 2 = gain), then run "
+            "step5_accuracy.py. Place the resulting accuracy_report.txt in the folder validation/<site_id>/."
         )
-    st.caption("Akurasi hanya ditampilkan jika titik referensi telah diinterpretasi dan laporan tersedia.")
+    st.caption("Accuracy is shown only once the reference points have been interpreted and a report is available.")
 
 with tab_method:
     left, right = st.columns(2)
     with left:
-        st.markdown("### Sumber dan cakupan data")
-        st.write(f"**Sumber:** {meta.get('source', 'NISAR L2 GCOV')}")
-        st.write(f"**Tanggal:** {dates[0]} sampai {dates[-1]}")
-        st.write(f"**Jumlah observasi:** {len(dates)}")
-        st.write(f"**Multilook:** {meta.get('looks', 'Tidak tercatat')} × {meta.get('looks', 'Tidak tercatat')}")
+        st.markdown("### Data sources and coverage")
+        st.write(f"**Source:** {meta.get('source', 'NISAR L2 GCOV')}")
+        st.write(f"**Dates:** {dates[0]} to {dates[-1]}")
+        st.write(f"**Number of observations:** {len(dates)}")
+        st.write(f"**Multilook:** {meta.get('looks', 'Not recorded')} × {meta.get('looks', 'Not recorded')}")
         st.write(f"**AOI bounds:** `{bounds}`")
     with right:
-        st.markdown("### Metode")
+        st.markdown("### Methods")
         st.markdown("""
-        1. Data NISAR Level-2 GCOV dual-polarization HH/HV.
-        2. Reduksi speckle melalui multilooking dalam linear power.
-        3. Perhitungan Radar Vegetation Index: **RVI = 4 × HV / (HH + HV)**.
-        4. Analisis perubahan ΔRVI dan ΔHV antar tanggal.
-        5. Klasifikasi loss/gain berdasarkan ambang perubahan yang ditentukan.
+        1. NISAR Level-2 GCOV dual-polarization HH/HV data.
+        2. Speckle reduction through multilooking in linear power.
+        3. Radar Vegetation Index calculation: **RVI = 4 × HV / (HH + HV)**.
+        4. Change analysis of ΔRVI and ΔHV between dates.
+        5. Loss/gain classification based on user-defined change thresholds.
         """)
     st.warning(
-        "Catatan: luas loss/gain pada dashboard ini merupakan estimasi dari ukuran piksel "
-        "koordinat geografis. Untuk pelaporan final, hitung luas pada CRS proyeksi yang sesuai "
-        "atau gunakan hasil luas dari pipeline GeoTIFF."
+        "Note: loss/gain areas in this dashboard are estimates derived from the pixel size "
+        "in geographic coordinates. For final reporting, compute areas in an appropriate "
+        "projected CRS or use the area values from the GeoTIFF pipeline."
     )
     if meta.get("granules"):
-        with st.expander("Daftar granule NISAR"):
+        with st.expander("NISAR granule list"):
             st.code("\n".join(meta["granules"]))
     st.markdown("**PalmSAR Innovators · NISAR L-band vegetation monitoring**")
