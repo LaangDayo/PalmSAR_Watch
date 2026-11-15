@@ -1,16 +1,21 @@
 """
-PalmSAR Watch — modern WebGIS dashboard
-Uses the existing NISAR/RVI NetCDF + metadata export from step3_change_export.py.
+PalmSAR Watch — WebGIS dashboard styled to the NASA Space Apps Challenge Brand Guidelines
+(updated June 25, 2026).
 
 Expected data:
     data/<site_id>/stack.nc
     data/<site_id>/meta.json
 
+Optional brand assets (download from spaceappschallenge.org/brand, do not redraw them):
+    assets/space_apps_logo_horizontal.png   -> Default (horizontal) logo, white colorway, for the header
+    assets/space_apps_logo_small.png        -> Small logo, used as the browser favicon
+
 Run:
-    streamlit run app.py
+    streamlit run app_spaceapps.py
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -22,42 +27,143 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import xarray as xr
+from matplotlib.colors import LinearSegmentedColormap
+from PIL import Image
 from streamlit_folium import st_folium
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("PALMSAR_DATA_DIR", ROOT / "data"))
+ASSETS = ROOT / "assets"
+LOGO_DEFAULT = ASSETS / "space_apps_logo_horizontal.png"
+LOGO_SMALL = ASSETS / "space_apps_logo_small.png"
 
+# ------------------------- Brand palette (Guidelines p.7) -------------------
+BLUE_YONDER = "#2E96F5"
+NEON_BLUE = "#0960E1"
+ROCKET_RED = "#E43700"
+MARTIAN_RED = "#8E1100"
+ELECTRIC_BLUE = "#0042A6"
+NEON_YELLOW = "#EAFE07"
+DEEP_BLUE = "#07173F"
+WHITE = "#FFFFFF"
+
+
+def _rgb(hex_color: str) -> tuple[int, int, int]:
+    h = hex_color.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def eased_gradient_css(start: str, end: str, angle: int = 135, steps: int = 12) -> str:
+    """Smooth linear gradient, top-left -> bottom-right (Guidelines p.8).
+    A smoothstep ease is applied so the transition is a gentle fade, not abrupt."""
+    r0, r1 = _rgb(start), _rgb(end)
+    stops = []
+    for i in range(steps + 1):
+        t = i / steps
+        e = t * t * (3 - 2 * t)
+        r, g, b = (round(a + (c - a) * e) for a, c in zip(r0, r1))
+        stops.append(f"rgb({r},{g},{b}) {t * 100:.1f}%")
+    return f"linear-gradient({angle}deg, {', '.join(stops)})"
+
+
+# Colormaps built only from brand colors. Loss/gain uses red vs. blue (not red vs. green)
+# so the maps remain readable for color-blind users.
+CMAP_RVI = LinearSegmentedColormap.from_list("palmsar_rvi", [DEEP_BLUE, NEON_BLUE, BLUE_YONDER, NEON_YELLOW])
+CMAP_DELTA = LinearSegmentedColormap.from_list("palmsar_delta", [ROCKET_RED, WHITE, BLUE_YONDER])
+CMAP_HV = LinearSegmentedColormap.from_list("palmsar_hv", [DEEP_BLUE, BLUE_YONDER, WHITE])
+
+# ------------------------------- Page config --------------------------------
+favicon = Image.open(LOGO_SMALL) if LOGO_SMALL.exists() else None
 st.set_page_config(
-    page_title="PalmSAR Watch | Geospatial Intelligence",
-    page_icon="🛰️",
+    page_title="PalmSAR Watch | NASA Space Apps Challenge",
+    page_icon=favicon,
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # ------------------------------- Styling ------------------------------------
-st.markdown("""
+CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
-html, body, [class*="css"] {font-family:'DM Sans',sans-serif;}
-.stApp {background:#0b1220;}
-[data-testid="stHeader"] {background:rgba(11,18,32,.92);}
-[data-testid="stSidebar"] {background:#101b2d;border-right:1px solid #26364d;}
-[data-testid="stSidebar"] * {color:#e5edf7;}
-h1,h2,h3 {font-family:'Space Grotesk',sans-serif;letter-spacing:-.03em;}
-.hero {padding:1.2rem 1.4rem;border:1px solid #26364d;border-radius:18px;
-       background:linear-gradient(120deg,#142b38 0%,#14243a 55%,#1b2d45 100%);}
-.hero-kicker {color:#78d6b0;font-size:.76rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;}
-.hero-title {font-family:'Space Grotesk',sans-serif;font-size:2rem;font-weight:700;color:#f4f8fc;margin:.2rem 0;}
-.hero-sub {color:#a9bbce;font-size:.94rem;}
-.metric-card {background:#121f31;border:1px solid #26364d;border-radius:14px;padding:1rem 1.1rem;}
-.metric-label {color:#9db0c5;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;}
-.metric-value {color:#f3f7fb;font-family:'Space Grotesk',sans-serif;font-size:1.55rem;font-weight:700;margin-top:.25rem;}
-.metric-note {color:#78d6b0;font-size:.75rem;margin-top:.15rem;}
-.section-note {color:#9db0c5;font-size:.84rem;}
-div[data-testid="stTabs"] button {font-weight:600;}
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&family=Fira+Sans:wght@700;900&family=Overpass:ital,wght@0,300;0,400;0,600;0,700;1,400&display=swap');
+
+html, body, [class*="css"], .stApp {font-family:'Overpass',sans-serif;color:@@WHITE@@;}
+.stApp {background:@@GRADIENT@@;background-attachment:fixed;}
+[data-testid="stHeader"] {background:transparent;}
 .block-container {padding-top:1.8rem;padding-bottom:2rem;max-width:1600px;}
+
+/* Typography hierarchy (Guidelines p.13) */
+h1, h2 {font-family:'Fira Sans',sans-serif;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:@@WHITE@@;}
+h3 {font-family:'Overpass',sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+    font-size:1.25rem;line-height:1.5;color:@@WHITE@@;}
+p, li, label, span {font-family:'Overpass',sans-serif;}
+pre, code, [data-testid="stCode"] * {font-family:'Fira Code',monospace !important;}
+
+/* Links: Neon Yellow on dark backgrounds, used sparingly (Guidelines p.13) */
+.stApp a {color:@@YELLOW@@ !important;text-decoration:underline;font-weight:700;}
+.stApp a:hover {color:@@WHITE@@ !important;}
+
+/* Sidebar: Deep Blue, white text */
+[data-testid="stSidebar"] {background:@@DEEP@@;border-right:1px solid rgba(46,150,245,.55);}
+[data-testid="stSidebar"] * {color:@@WHITE@@;}
+
+/* Tabs */
+div[data-testid="stTabs"] button {font-family:'Overpass',sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:.05em;}
+div[data-testid="stTabs"] button p {color:@@WHITE@@;}
+div[data-testid="stTabs"] button[aria-selected="true"] p {color:@@YELLOW@@;}
+[data-baseweb="tab-highlight"] {background-color:@@YELLOW@@ !important;}
+[data-baseweb="tab-border"] {background-color:rgba(46,150,245,.45) !important;}
+
+/* Buttons: Neon Yellow with Deep Blue text (Guidelines p.14) */
+.stDownloadButton button, .stButton button {
+  background:@@YELLOW@@;color:@@DEEP@@;border:0;border-radius:6px;
+  font-family:'Overpass',sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+.stDownloadButton button p, .stButton button p {color:@@DEEP@@;font-weight:700;}
+.stDownloadButton button:hover, .stButton button:hover {background:@@WHITE@@;color:@@DEEP@@;}
+
+/* Alerts: Deep Blue surface, white text, Neon Yellow accent border (not color-only: icon + text remain) */
+div[data-testid="stAlert"], div[data-testid="stAlert"] > div {
+  background:@@DEEP@@ !important;color:@@WHITE@@ !important;}
+div[data-testid="stAlert"] {border:1px solid @@YELLOW@@;border-radius:10px;}
+div[data-testid="stAlert"] p {color:@@WHITE@@ !important;}
+
+/* Code blocks and captions */
+[data-testid="stCode"] pre {background:@@DEEP@@ !important;border:1px solid rgba(46,150,245,.5);}
+[data-testid="stCaptionContainer"] {color:@@WHITE@@;opacity:.9;}
+
+/* Hero */
+.hero {position:relative;overflow:hidden;padding:1.6rem 1.8rem;border:1px solid rgba(46,150,245,.55);
+       border-radius:18px;background:@@DEEP@@;}
+.hero-pattern {position:absolute;inset:0;opacity:.25;pointer-events:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160' fill='none' stroke='white' stroke-width='1'><path d='M26 14v24M14 26h24'/><path d='M118 58v20M108 68h20'/><path d='M62 122v16M54 130h16'/><path d='M140 132v14M133 139h14'/></svg>");}
+.hero-inner {position:relative;}
+.hero-logo {height:64px;width:auto;display:block;margin:0 0 1.1rem 0;}
+.hero-kicker {color:@@YELLOW@@;font-size:.8rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;}
+.hero-title {font-family:'Fira Sans',sans-serif;font-size:clamp(2.1rem,5vw,3.75rem);font-weight:900;line-height:1.2;
+             text-transform:uppercase;letter-spacing:.05em;color:@@WHITE@@;margin:.25rem 0 .4rem 0;}
+.hero-sub {font-family:'Overpass',sans-serif;font-size:clamp(1.1rem,2.6vw,2rem);line-height:1.3;color:@@WHITE@@;}
+.hero-sub .accent {color:@@YELLOW@@;display:block;}
+
+/* Cards */
+.metric-card {background:@@DEEP@@;border:1px solid rgba(46,150,245,.55);border-radius:14px;padding:1rem 1.1rem;}
+.metric-label {color:@@YONDER@@;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;}
+.metric-value {color:@@WHITE@@;font-family:'Fira Sans',sans-serif;font-size:1.55rem;font-weight:700;margin-top:.25rem;}
+.metric-note {color:@@WHITE@@;font-weight:300;font-size:.82rem;margin-top:.15rem;}
+.section-note {color:@@WHITE@@;font-weight:300;font-size:.95rem;}
+.legend-card {background:@@DEEP@@;border:1px solid rgba(46,150,245,.55);border-radius:12px;padding:.7rem 1rem;margin-top:.6rem;}
+.legend-title {color:@@WHITE@@;font-size:.85rem;font-weight:600;margin-bottom:.4rem;}
+.legend-bar {height:11px;border-radius:8px;}
+.legend-scale {display:flex;justify-content:space-between;color:@@WHITE@@;font-size:.78rem;margin-top:.25rem;}
+.legend-row {color:@@WHITE@@;font-size:.9rem;}
+.footer {margin-top:2rem;padding-top:1rem;border-top:1px solid rgba(46,150,245,.55);
+         font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;color:@@WHITE@@;}
 </style>
-""", unsafe_allow_html=True)
+"""
+st.markdown(
+    CSS.replace("@@GRADIENT@@", eased_gradient_css(ELECTRIC_BLUE, DEEP_BLUE))
+       .replace("@@WHITE@@", WHITE).replace("@@YELLOW@@", NEON_YELLOW)
+       .replace("@@DEEP@@", DEEP_BLUE).replace("@@YONDER@@", BLUE_YONDER),
+    unsafe_allow_html=True,
+)
 
 
 # ------------------------------- Data ---------------------------------------
@@ -89,19 +195,19 @@ def load_stack(folder: str) -> xr.Dataset:
     return ds
 
 
-def rgba_image(array: np.ndarray, cmap: str, vmin: float, vmax: float, opacity: float):
+def rgba_image(array: np.ndarray, cmap, vmin: float, vmax: float, opacity: float):
     safe = np.nan_to_num(array, nan=vmin)
     norm = np.clip((safe - vmin) / (vmax - vmin), 0, 1)
-    rgba = matplotlib.colormaps[cmap](norm)
+    rgba = cmap(norm)
     rgba[..., 3] = np.where(np.isfinite(array), opacity, 0)
     return (rgba * 255).astype("uint8")
 
 
 def classes_image(classes: np.ndarray, opacity: float):
     rgba = np.zeros(classes.shape + (4,), dtype="uint8")
-    rgba[classes == 1] = (215, 25, 28, int(255 * opacity))
-    rgba[classes == 2] = (26, 150, 65, int(255 * opacity))
-    rgba[classes == 0] = (230, 230, 230, int(150 * opacity))
+    rgba[classes == 1] = (*_rgb(ROCKET_RED), int(255 * opacity))    # loss
+    rgba[classes == 2] = (*_rgb(BLUE_YONDER), int(255 * opacity))   # gain
+    rgba[classes == 0] = (*_rgb(WHITE), int(150 * opacity))         # stable
     return rgba
 
 
@@ -116,13 +222,15 @@ def pixel_area_ha(ds: xr.Dataset) -> float:
     return (dlon * 111320 * np.cos(np.radians(lat_c))) * (dlat * 110540) / 10000
 
 
-def legend_html(cmap: str, lo: float, hi: float, label: str) -> str:
-    stops = ", ".join(matplotlib.colors.to_hex(matplotlib.colormaps[cmap](v)) for v in np.linspace(0, 1, 9))
+def legend_html(cmap, lo: float, hi: float, label: str, lo_text: str = "", hi_text: str = "") -> str:
+    stops = ", ".join(matplotlib.colors.to_hex(cmap(v)) for v in np.linspace(0, 1, 9))
+    lo_label = f"{lo:g}" + (f" · {lo_text}" if lo_text else "")
+    hi_label = f"{hi:g}" + (f" · {hi_text}" if hi_text else "")
     return f"""
-    <div style="color:#dbe7f3;font-size:.82rem;margin:.55rem 0 .35rem">{label}</div>
-    <div style="height:11px;border-radius:8px;background:linear-gradient(to right,{stops})"></div>
-    <div style="display:flex;justify-content:space-between;color:#9db0c5;font-size:.72rem">
-      <span>{lo:g}</span><span>{hi:g}</span>
+    <div class="legend-card">
+      <div class="legend-title">{label}</div>
+      <div class="legend-bar" style="background:linear-gradient(to right,{stops})"></div>
+      <div class="legend-scale"><span>{lo_label}</span><span>{hi_label}</span></div>
     </div>"""
 
 
@@ -134,9 +242,21 @@ def metric_card(label: str, value: str, note: str = ""):
     )
 
 
+def style_figure(fig: go.Figure, height: int, y_title: str) -> go.Figure:
+    fig.update_layout(
+        template="plotly_dark", height=height, margin=dict(l=10, r=10, t=25, b=10),
+        paper_bgcolor=DEEP_BLUE, plot_bgcolor=DEEP_BLUE,
+        font=dict(family="Overpass, sans-serif", color=WHITE, size=14),
+        xaxis=dict(title="Observation date", gridcolor="rgba(255,255,255,.15)", zeroline=False),
+        yaxis=dict(title=y_title, gridcolor="rgba(255,255,255,.15)", zeroline=False),
+        legend=dict(font=dict(color=WHITE)),
+    )
+    return fig
+
+
 # -------------------------------- Sidebar -----------------------------------
 sites = list_sites()
-st.sidebar.markdown("## 🛰️ PalmSAR Watch")
+st.sidebar.markdown("## PalmSAR Watch")
 st.sidebar.caption("NISAR L-band · Oil-palm vegetation monitoring")
 if not sites:
     st.error(
@@ -189,19 +309,19 @@ if meta.get("synthetic"):
 stats = None
 if layer == "Radar Vegetation Index (RVI)":
     arr = ds["rvi"].isel(time=dates.index(selected_date)).values
-    image = rgba_image(arr, "YlGn", 0.0, 1.2, opacity)
-    legend = legend_html("YlGn", 0.0, 1.2, f"RVI · {selected_date}")
+    image = rgba_image(arr, CMAP_RVI, 0.0, 1.2, opacity)
+    legend = legend_html(CMAP_RVI, 0.0, 1.2, f"RVI · {selected_date}", "sparse", "dense vegetation")
 elif layer == "HV backscatter (dB)":
     arr = ds["hv_db"].isel(time=dates.index(selected_date)).values
-    image = rgba_image(arr, "gray", -25, -8, opacity)
-    legend = legend_html("gray", -25, -8, f"HV γ⁰ (dB) · {selected_date}")
+    image = rgba_image(arr, CMAP_HV, -25, -8, opacity)
+    legend = legend_html(CMAP_HV, -25, -8, f"HV γ⁰ (dB) · {selected_date}", "weak", "strong")
 else:
     a = ds.isel(time=dates.index(date0))
     b = ds.isel(time=dates.index(date1))
     delta_rvi = (b["rvi"] - a["rvi"]).values
     if layer == "RVI change (ΔRVI)":
-        image = rgba_image(delta_rvi, "RdYlGn", -0.6, 0.6, opacity)
-        legend = legend_html("RdYlGn", -0.6, 0.6, f"ΔRVI · {date1} minus {date0}")
+        image = rgba_image(delta_rvi, CMAP_DELTA, -0.6, 0.6, opacity)
+        legend = legend_html(CMAP_DELTA, -0.6, 0.6, f"ΔRVI · {date1} minus {date0}", "loss", "gain")
     else:
         delta_hv = (b["hv_db"] - a["hv_db"]).values
         classes = np.zeros(delta_rvi.shape, dtype="uint8")
@@ -216,19 +336,34 @@ else:
             "stable": int((classes == 0).sum()) * px_area,
             "gain": int((classes == 2).sum()) * px_area,
         }
-        legend = """
-        <div style="font-size:.82rem;color:#dbe7f3;margin:.5rem 0">
-        <span style="color:#d7191c">■</span> Loss &nbsp;
-        <span style="color:#e6e6e6">■</span> Stable &nbsp;
-        <span style="color:#1a9641">■</span> Gain</div>"""
+        # Each class is paired with a distinct symbol and a text label, never color alone (Guidelines p.7)
+        legend = f"""
+        <div class="legend-card">
+          <div class="legend-title">Change classes · {date0} → {date1}</div>
+          <div class="legend-row">
+            <span style="color:{ROCKET_RED}">▼</span> Loss &nbsp;&nbsp;
+            <span style="color:{WHITE}">●</span> Stable &nbsp;&nbsp;
+            <span style="color:{BLUE_YONDER}">▲</span> Gain
+          </div>
+        </div>"""
 
 bounds = meta["bounds"]  # [[lat_min, lon_min], [lat_max, lon_max]]
 
 # -------------------------------- Header -------------------------------------
+logo_html = ""
+if LOGO_DEFAULT.exists():
+    b64 = base64.b64encode(LOGO_DEFAULT.read_bytes()).decode()
+    # Height only; width stays automatic so the logo is never stretched or distorted.
+    logo_html = f'<img class="hero-logo" alt="NASA Space Apps Challenge logo" src="data:image/png;base64,{b64}">'
+
 st.markdown(
-    f'<div class="hero"><div class="hero-kicker">Geospatial intelligence · NISAR L-band</div>'
-    f'<div class="hero-title">PalmSAR Watch</div>'
-    f'<div class="hero-sub">{site} · {meta.get("description", "Oil-palm vegetation dynamics monitoring")}</div></div>',
+    f'<div class="hero"><div class="hero-pattern"></div><div class="hero-inner">'
+    f'{logo_html}'
+    f'<div class="hero-kicker">Geospatial intelligence · NISAR L-band</div>'
+    f'<h1 class="hero-title">PalmSAR Watch</h1>'
+    f'<div class="hero-sub"><span class="accent">{site}</span>'
+    f'{meta.get("description", "Oil-palm vegetation dynamics monitoring")}</div>'
+    f'</div></div>',
     unsafe_allow_html=True,
 )
 if meta.get("synthetic"):
@@ -236,19 +371,20 @@ if meta.get("synthetic"):
 st.write("")
 
 # KPI strip
+span_days = (pd.Timestamp(dates[-1]) - pd.Timestamp(dates[0])).days
 k1, k2, k3, k4 = st.columns(4)
 with k1:
     metric_card("Observations", f"{len(dates)}", "NISAR dates")
 with k2:
-    metric_card("Period", f"{len(dates)}", f"{dates[0]} to {dates[-1]}")
+    metric_card("Period", f"{span_days} days", f"{dates[0]} to {dates[-1]}")
 with k3:
     metric_card("Active layer", layer.split("(")[0].strip(), "Map visualization")
 with k4:
-    metric_card("Temporal resolution", "NISAR", "Time series follows available data")
+    metric_card("Sensor", "NISAR", "L-band · HH/HV dual-pol")
 
 st.write("")
 tab_map, tab_temporal, tab_accuracy, tab_method = st.tabs(
-    ["🗺️ Interactive map", "📈 Temporal analysis", "🎯 Accuracy validation", "ⓘ Methods & data"]
+    ["Interactive map", "Temporal analysis", "Accuracy validation", "Methods & data"]
 )
 
 with tab_map:
@@ -266,7 +402,7 @@ with tab_map:
         folium.raster_layers.ImageOverlay(
             image=image, bounds=bounds, mercator_project=True, name=layer, interactive=False,
         ).add_to(fmap)
-        folium.Rectangle(bounds, color="#55d6a6", weight=2, fill=False, tooltip="Area of Interest").add_to(fmap)
+        folium.Rectangle(bounds, color=NEON_YELLOW, weight=2, fill=False, tooltip="Area of Interest").add_to(fmap)
         folium.LayerControl(collapsed=False).add_to(fmap)
         fmap.fit_bounds(bounds)
         map_result = st_folium(
@@ -279,12 +415,13 @@ with tab_map:
     with info_col:
         st.markdown("### Area summary")
         st.markdown('<div class="section-note">Information follows the selected layer and date.</div>', unsafe_allow_html=True)
+        st.write("")
         if stats:
-            metric_card("Vegetation loss", f"{stats['loss']:,.1f} ha", "Estimate based on geographic pixel size")
+            metric_card("▼ Vegetation loss", f"{stats['loss']:,.1f} ha", "Estimate based on geographic pixel size")
             st.write("")
-            metric_card("Stable vegetation", f"{stats['stable']:,.1f} ha", "Class with no change beyond the thresholds")
+            metric_card("● Stable vegetation", f"{stats['stable']:,.1f} ha", "Class with no change beyond the thresholds")
             st.write("")
-            metric_card("Vegetation gain", f"{stats['gain']:,.1f} ha", "Estimate based on geographic pixel size")
+            metric_card("▲ Vegetation gain", f"{stats['gain']:,.1f} ha", "Estimate based on geographic pixel size")
         else:
             metric_card("Active date", selected_date if layer in ("Radar Vegetation Index (RVI)", "HV backscatter (dB)") else f"{date0} → {date1}", "Observation / analysis period")
             st.write("")
@@ -305,20 +442,16 @@ with tab_temporal:
     median_rvi = ds["rvi"].median(dim=("lat", "lon"), skipna=True).values
     mean_hv = ds["hv_db"].mean(dim=("lat", "lon"), skipna=True).values
     temporal = go.Figure()
-    temporal.add_trace(go.Scatter(x=dates, y=median_rvi, mode="lines+markers", name="Median RVI", line=dict(width=3)))
-    temporal.update_layout(
-        template="plotly_dark", height=430, margin=dict(l=10, r=10, t=25, b=10),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(18,31,49,.55)",
-        xaxis_title="Observation date", yaxis_title="Median RVI",
-    )
-    st.plotly_chart(temporal, use_container_width=True)
-    hvfig = go.Figure(go.Scatter(x=dates, y=mean_hv, mode="lines+markers", name="Mean HV (dB)"))
-    hvfig.update_layout(
-        template="plotly_dark", height=330, margin=dict(l=10, r=10, t=25, b=10),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(18,31,49,.55)",
-        xaxis_title="Observation date", yaxis_title="Mean HV (dB)",
-    )
-    st.plotly_chart(hvfig, use_container_width=True)
+    temporal.add_trace(go.Scatter(
+        x=dates, y=median_rvi, mode="lines+markers", name="Median RVI",
+        line=dict(width=3, color=NEON_YELLOW), marker=dict(symbol="circle", size=8),
+    ))
+    st.plotly_chart(style_figure(temporal, 430, "Median RVI"), use_container_width=True)
+    hvfig = go.Figure(go.Scatter(
+        x=dates, y=mean_hv, mode="lines+markers", name="Mean HV (dB)",
+        line=dict(width=3, color=BLUE_YONDER), marker=dict(symbol="diamond", size=8),
+    ))
+    st.plotly_chart(style_figure(hvfig, 330, "Mean HV (dB)"), use_container_width=True)
     export_df = pd.DataFrame({"date": dates, "median_rvi": median_rvi, "mean_hv_db": mean_hv})
     st.download_button("Download temporal summary (CSV)", export_df.to_csv(index=False), "palmsar_temporal.csv", "text/csv")
 
@@ -361,4 +494,9 @@ with tab_method:
     if meta.get("granules"):
         with st.expander("NISAR granule list"):
             st.code("\n".join(meta["granules"]))
-    st.markdown("**PalmSAR Innovators · NISAR L-band vegetation monitoring**")
+
+st.markdown(
+    '<div class="footer">PalmSAR Innovators · NISAR L-band vegetation monitoring · '
+    'Developed for the NASA Space Apps Challenge</div>',
+    unsafe_allow_html=True,
+)
