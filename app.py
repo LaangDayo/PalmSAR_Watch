@@ -383,8 +383,8 @@ with k4:
     metric_card("Sensor", "NISAR", "L-band · HH/HV dual-pol")
 
 st.write("")
-tab_map, tab_temporal, tab_accuracy, tab_method = st.tabs(
-    ["Interactive map", "Temporal analysis", "Accuracy validation", "Methods & data"]
+tab_map, tab_temporal, tab_method = st.tabs(
+    ["Interactive map", "Temporal analysis", "Methods & data"]
 )
 
 with tab_map:
@@ -454,19 +454,6 @@ with tab_temporal:
     st.plotly_chart(style_figure(hvfig, 330, "Mean HV (dB)"), use_container_width=True)
     export_df = pd.DataFrame({"date": dates, "median_rvi": median_rvi, "mean_hv_db": mean_hv})
     st.download_button("Download temporal summary (CSV)", export_df.to_csv(index=False), "palmsar_temporal.csv", "text/csv")
-
-with tab_accuracy:
-    st.markdown("### Classification validation results")
-    report_path = ROOT / "validation" / os.getenv("PALMSAR_SITE_ID", "sumut_main") / "accuracy_report.txt"
-    if report_path.exists():
-        st.code(report_path.read_text(encoding="utf-8"), language="text")
-    else:
-        st.info(
-            "Accuracy report not found. Run step4_samples.py, fill in the label column "
-            "of the GeoJSON in QGIS (0 = stable, 1 = loss, 2 = gain), then run "
-            "step5_accuracy.py. Place the resulting accuracy_report.txt in the folder validation/<site_id>/."
-        )
-    st.caption("Accuracy is shown only once the reference points have been interpreted and a report is available.")
 
 with tab_method:
     left, right = st.columns(2)
